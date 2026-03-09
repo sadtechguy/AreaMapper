@@ -45,6 +45,22 @@ def insert_location_to_db(name, address, lat, lon, loc_type):
     cur.close()
     conn.close()
 
+def update_delivery_status(location_name, new_status):
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    # This SQL finds the delivery associated with a specific location name and updates it
+    query = """
+        UPDATE deliveries 
+        SET status = %s 
+        FROM locations 
+        WHERE deliveries.location_id = locations.location_id 
+        AND locations.name = %s
+    """
+    cur.execute(query, (new_status, location_name))
+    conn.commit()
+    cur.close()
+    conn.close()
+
 def get_coordinates(address_text):
     geolocator = Nominatim(user_agent="AreaMapper_App")
     try:
@@ -54,7 +70,13 @@ def get_coordinates(address_text):
         return None, None
     except:
         return None, None
+    
+# ==========================================
+# 🚨 CRITICAL FIX: LOAD DATA FIRST
+# We must load the data before the sidebar or the main UI tries to use it!
+# ==========================================
 
+df = load_data()
 # --- SIDEBAR: SMART DATA ENTRY FORM ---
 st.sidebar.header("➕ Add New Drop Point")
 
@@ -97,8 +119,26 @@ with st.sidebar.form("add_location_form"):
         else:
             st.sidebar.error("Please fill in both the Name and Address.")
 
+# --- SECTION 2: UPDATE STATUS ---
+st.sidebar.markdown("---") # Visual separator line
+st.sidebar.subheader("Manage Deliveries")
+
+# Get a list of locations that have deliveries to show in the dropdown
+delivery_locations = df[df['Status'] != 'No Delivery']['Location'].tolist()
+
+if delivery_locations:
+    selected_loc = st.sidebar.selectbox("Select Location", delivery_locations)
+    new_stat = st.sidebar.selectbox("New Status", ["Pending", "In Transit", "Done"])
+    
+    if st.sidebar.button("Update Status"):
+        update_delivery_status(selected_loc, new_stat)
+        st.success(f"Updated {selected_loc} to {new_stat}!")
+        st.rerun() # Refresh the app to show the new color on the map
+else:
+    st.sidebar.info("No active deliveries to manage.")
+
+
 # --- MAIN UI ---
-df = load_data()
 col1, col2 = st.columns([1, 2])
 
 with col1:

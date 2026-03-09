@@ -139,29 +139,60 @@ else:
 
 
 # --- MAIN UI ---
-col1, col2 = st.columns([1, 2])
+# Create two tabs for the main dashboard
+tab1, tab2 = st.tabs(["🗺️ Live Map", "📊 Admin Dashboard"])
 
-with col1:
-    st.subheader("Data Overview")
-    st.dataframe(df[["Location", "Address", "Status"]], use_container_width=True)
-
-with col2:
-    st.subheader("Live Operations Map")
-    m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
+# --- TAB 1: THE OPERATIONS MAP ---
+with tab1:
+    col1, col2 = st.columns([1, 2])
     
-    for index, row in df.iterrows():
-        if pd.notna(row['latitude']) and pd.notna(row['longitude']):
-            if row['type'] == 'warehouse':
-                color = "blue"
-            elif row['Status'] == 'Done':
-                color = "green"
-            else:
-                color = "red"
+    with col1:
+        st.subheader("Data Overview")
+        st.dataframe(df[["Location", "Address", "Status"]], use_container_width=True)
+    
+    with col2:
+        st.subheader("Live Operations Map")
+        m = folium.Map(location=[-6.25, 106.75], zoom_start=11)
+        
+        for index, row in df.iterrows():
+            if pd.notna(row['latitude']) and pd.notna(row['longitude']):
+                if row['type'] == 'warehouse':
+                    color = "blue"
+                elif row['Status'] == 'Done':
+                    color = "green"
+                else:
+                    color = "red"
+                    
+                folium.Marker(
+                    location=[row['latitude'], row['longitude']],
+                    popup=f"<b>{row['Location']}</b><br>Status: {row['Status']}",
+                    icon=folium.Icon(color=color)
+                ).add_to(m)
                 
-            folium.Marker(
-                location=[row['latitude'], row['longitude']],
-                popup=f"<b>{row['Location']}</b><br>Status: {row['Status']}",
-                icon=folium.Icon(color=color)
-            ).add_to(m)
-            
-    st_folium(m, width=800, height=500)
+        st_folium(m, width=800, height=500)
+
+# --- TAB 2: THE ADMIN DASHBOARD ---
+with tab2:
+    st.subheader("Delivery Status Summary")
+    
+    # 1. Filter out the warehouses to only look at actual deliveries
+    deliveries_only = df[df['Status'] != 'No Delivery']
+    
+    # 2. Count how many deliveries are in each status
+    total_deliveries = len(deliveries_only)
+    done_count = len(deliveries_only[deliveries_only['Status'] == 'Done'])
+    transit_count = len(deliveries_only[deliveries_only['Status'] == 'In Transit'])
+    pending_count = len(deliveries_only[deliveries_only['Status'] == 'Pending'])
+    
+    # 3. Display the numbers using Streamlit 'metrics' (big beautiful numbers)
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric(label="Total Deliveries", value=total_deliveries)
+    m2.metric(label="Completed ✅", value=done_count)
+    m3.metric(label="In Transit 🚚", value=transit_count)
+    m4.metric(label="Pending ⏳", value=pending_count)
+    
+    st.markdown("---")
+    
+    # 4. Show a clean table of only the active/completed jobs
+    st.subheader("Delivery Roster")
+    st.dataframe(deliveries_only[["Location", "Address", "Status", "type"]], use_container_width=True)

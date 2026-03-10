@@ -99,6 +99,42 @@ elif st.session_state["authentication_status"]:
         cur.close()
         conn.close()
 
+    def update_location_details(old_name, new_name, new_address, new_type):
+        """Updates the text details of an existing location."""
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        query = """
+            UPDATE locations 
+            SET name = %s, address = %s, type = %s 
+            WHERE name = %s
+        """
+        cur.execute(query, (new_name, new_address, new_type, old_name))
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    def delete_location_from_db(location_name):
+        """Deletes a location AND its associated delivery record to prevent database errors."""
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        
+        # 1. Delete the linked delivery first (using Postgres' USING clause)
+        query_deliveries = """
+            DELETE FROM deliveries 
+            USING locations 
+            WHERE deliveries.location_id = locations.location_id 
+            AND locations.name = %s
+        """
+        cur.execute(query_deliveries, (location_name,))
+        
+        # 2. Now it is safe to delete the location
+        query_locations = "DELETE FROM locations WHERE name = %s"
+        cur.execute(query_locations, (location_name,))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+
     def get_coordinates(address_text):
         geolocator = Nominatim(user_agent="AreaMapper_App")
         try:
@@ -286,3 +322,57 @@ elif st.session_state["authentication_status"]:
         # 4. Show a clean table of only the active/completed jobs
         st.subheader("Delivery Roster")
         st.dataframe(deliveries_only[["Location", "Address", "Status", "type"]], use_container_width=True)
+
+        # ==========================================
+        # --- VERSION 3.0: DATABASE MANAGEMENT ---
+        # ==========================================
+        st.markdown("---")
+        st.subheader("🛠️ Database Management")
+        
+        # Get a list of ALL locations (warehouses and customers)
+        all_locations = df['Location'].tolist()
+        
+        if all_locations:
+            loc_to_manage = st.selectbox("Select a Location to Edit or Delete", all_locations)
+            
+            # Find the current details of the selected location so we can pre-fill the edit form
+            current_details = df[df['Location'] == loc_to_manage].iloc[0]
+            
+            # Create two columns so the Edit and Delete forms sit side-by-side
+            manage_col1, manage_col2 = st.columns(2)
+            
+            # --- EDIT FORM ---
+            with manage_col1:
+                with st.form("edit_location_form"):
+                    st.write("**✏️ Edit Location Details**")
+                    
+                    # Pre-fill the inputs with the existing data
+                    edit_name = st.text_input("Name", value=current_details['Location'])
+                    edit_address = st.text_input("Address", value=current_details['Address'])
+                    
+                    # Figure out which dropdown option should be selected by default
+                    type_index = 0 if current_details['type'] == 'customer' else 1
+                    edit_type = st.selectbox("Location Type", ["customer", "warehouse"], index=type_index)
+                    
+                    update_btn = st.form_submit_button("Save Changes")
+                    
+                    if update_btn:
+                        update_location_details(loc_to_manage, edit_name, edit_address, edit_type)
+                        st.success(f"Successfully updated '{loc_to_manage}'!")
+                        st.cache_data.clear()
+                        st.rerun()
+                        
+            # --- DELETE FORM ---
+            with manage_col2:
+                with st.form("delete_location_form"):
+                    st.write("**🗑️ Delete Location**")
+                    st.warning(f"Warning: This will permanently erase '{loc_to_manage}' and its delivery history.")
+                    
+                    # Use type="primary" to make the delete button stand out (usually turns it red)
+                    delete_btn = st.form_submit_button("Permanently Delete", type="primary")
+                    
+                    if delete_btn:
+                        delete_location_from_db(loc_to_manage)
+                        st.success(f"Successfully deleted '{loc_to_manage}'.")
+                        st.cache_data.clear()
+                        st.rerun()

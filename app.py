@@ -45,6 +45,9 @@ elif st.session_state["authentication_status"]:
     # Put a logout button in the sidebar
     authenticator.logout('Logout', 'sidebar')
     st.sidebar.write(f'Welcome, *{st.session_state["name"]}*')
+
+    # --- NEW: Check if the logged-in user is the boss ---
+    is_admin = st.session_state["username"] == "admin"
     
     # ==========================================
     # 🚨 INDENT EVERYTHING ELSE BELOW THIS LINE! 🚨
@@ -173,46 +176,47 @@ elif st.session_state["authentication_status"]:
 
     df = load_data()
     # --- SIDEBAR: SMART DATA ENTRY FORM ---
-    st.sidebar.header("➕ Add New Drop Point")
+    if is_admin:
+        st.sidebar.header("➕ Add New Drop Point")
 
-    # 1. MOVED OUTSIDE THE FORM: Now it triggers an instant UI update!
-    manual_override = st.sidebar.checkbox("I have exact coordinates")
+        # 1. MOVED OUTSIDE THE FORM: Now it triggers an instant UI update!
+        manual_override = st.sidebar.checkbox("I have exact coordinates")
 
-    # 2. THE FORM:
-    with st.sidebar.form("add_location_form"):
-        new_name = st.text_input("Location Name", placeholder="e.g., Hidden Warehouse")
-        new_address = st.text_input("Address", placeholder="e.g., Unmapped Street 123")
-        new_type = st.selectbox("Location Type", ["customer", "warehouse"])
-        
-        st.markdown("---")
-        
-        # These will now correctly unlock when the box above is checked
-        manual_lat = st.number_input("Latitude", value=-6.200000, format="%.6f", disabled=not manual_override)
-        manual_lon = st.number_input("Longitude", value=106.816666, format="%.6f", disabled=not manual_override)
-        
-        submitted = st.form_submit_button("Save to Database")
-        
-        if submitted:
-            if new_name and new_address:
-                lat, lon = None, None
-                
-                if manual_override:
-                    lat, lon = manual_lat, manual_lon
-                    source_msg = "Saved with manual coordinates"
+        # 2. THE FORM:
+        with st.sidebar.form("add_location_form"):
+            new_name = st.text_input("Location Name", placeholder="e.g., Hidden Warehouse")
+            new_address = st.text_input("Address", placeholder="e.g., Unmapped Street 123")
+            new_type = st.selectbox("Location Type", ["customer", "warehouse"])
+            
+            st.markdown("---")
+            
+            # These will now correctly unlock when the box above is checked
+            manual_lat = st.number_input("Latitude", value=-6.200000, format="%.6f", disabled=not manual_override)
+            manual_lon = st.number_input("Longitude", value=106.816666, format="%.6f", disabled=not manual_override)
+            
+            submitted = st.form_submit_button("Save to Database")
+            
+            if submitted:
+                if new_name and new_address:
+                    lat, lon = None, None
+                    
+                    if manual_override:
+                        lat, lon = manual_lat, manual_lon
+                        source_msg = "Saved with manual coordinates"
+                    else:
+                        with st.spinner('Calculating coordinates automatically...'):
+                            lat, lon = get_coordinates(new_address)
+                            source_msg = "Address mapped automatically"
+                    
+                    if lat and lon:
+                        insert_location_to_db(new_name, new_address, lat, lon, new_type)
+                        st.sidebar.success(f"{source_msg}! Added {new_name} to map.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.sidebar.error("Could not find that address. Please check the 'exact coordinates' box and enter them manually.")
                 else:
-                    with st.spinner('Calculating coordinates automatically...'):
-                        lat, lon = get_coordinates(new_address)
-                        source_msg = "Address mapped automatically"
-                
-                if lat and lon:
-                    insert_location_to_db(new_name, new_address, lat, lon, new_type)
-                    st.sidebar.success(f"{source_msg}! Added {new_name} to map.")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.sidebar.error("Could not find that address. Please check the 'exact coordinates' box and enter them manually.")
-            else:
-                st.sidebar.error("Please fill in both the Name and Address.")
+                    st.sidebar.error("Please fill in both the Name and Address.")
 
     # --- SECTION 2: UPDATE STATUS ---
     st.sidebar.markdown("---") # Visual separator line
@@ -235,7 +239,12 @@ elif st.session_state["authentication_status"]:
 
     # --- MAIN UI ---
     # Create two tabs for the main dashboard
-    tab1, tab2 = st.tabs(["🗺️ Live Map", "📊 Admin Dashboard"])
+    # Conditional Tabs!
+    if is_admin:
+        tab1, tab2 = st.tabs(["🗺️ Live Map", "📊 Admin Dashboard"])
+    else:
+        tab1 = st.container() # Driver just gets a normal screen for the map
+        tab2 = None           # Driver doesn't get a second tab
 
     # --- TAB 1: THE OPERATIONS MAP ---
     with tab1:
@@ -298,81 +307,82 @@ elif st.session_state["authentication_status"]:
             st_folium(m, width=800, height=500)
 
     # --- TAB 2: THE ADMIN DASHBOARD ---
-    with tab2:
-        st.subheader("Delivery Status Summary")
-        
-        # 1. Filter out the warehouses to only look at actual deliveries
-        deliveries_only = df[df['Status'] != 'No Delivery']
-        
-        # 2. Count how many deliveries are in each status
-        total_deliveries = len(deliveries_only)
-        done_count = len(deliveries_only[deliveries_only['Status'] == 'Done'])
-        transit_count = len(deliveries_only[deliveries_only['Status'] == 'In Transit'])
-        pending_count = len(deliveries_only[deliveries_only['Status'] == 'Pending'])
-        
-        # 3. Display the numbers using Streamlit 'metrics' (big beautiful numbers)
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric(label="Total Deliveries", value=total_deliveries)
-        m2.metric(label="Completed ✅", value=done_count)
-        m3.metric(label="In Transit 🚚", value=transit_count)
-        m4.metric(label="Pending ⏳", value=pending_count)
-        
-        st.markdown("---")
-        
-        # 4. Show a clean table of only the active/completed jobs
-        st.subheader("Delivery Roster")
-        st.dataframe(deliveries_only[["Location", "Address", "Status", "type"]], use_container_width=True)
+    if is_admin:
+        with tab2:
+            st.subheader("Delivery Status Summary")
+            
+            # 1. Filter out the warehouses to only look at actual deliveries
+            deliveries_only = df[df['Status'] != 'No Delivery']
+            
+            # 2. Count how many deliveries are in each status
+            total_deliveries = len(deliveries_only)
+            done_count = len(deliveries_only[deliveries_only['Status'] == 'Done'])
+            transit_count = len(deliveries_only[deliveries_only['Status'] == 'In Transit'])
+            pending_count = len(deliveries_only[deliveries_only['Status'] == 'Pending'])
+            
+            # 3. Display the numbers using Streamlit 'metrics' (big beautiful numbers)
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric(label="Total Deliveries", value=total_deliveries)
+            m2.metric(label="Completed ✅", value=done_count)
+            m3.metric(label="In Transit 🚚", value=transit_count)
+            m4.metric(label="Pending ⏳", value=pending_count)
+            
+            st.markdown("---")
+            
+            # 4. Show a clean table of only the active/completed jobs
+            st.subheader("Delivery Roster")
+            st.dataframe(deliveries_only[["Location", "Address", "Status", "type"]], use_container_width=True)
 
-        # ==========================================
-        # --- VERSION 3.0: DATABASE MANAGEMENT ---
-        # ==========================================
-        st.markdown("---")
-        st.subheader("🛠️ Database Management")
-        
-        # Get a list of ALL locations (warehouses and customers)
-        all_locations = df['Location'].tolist()
-        
-        if all_locations:
-            loc_to_manage = st.selectbox("Select a Location to Edit or Delete", all_locations)
+            # ==========================================
+            # --- VERSION 3.0: DATABASE MANAGEMENT ---
+            # ==========================================
+            st.markdown("---")
+            st.subheader("🛠️ Database Management")
             
-            # Find the current details of the selected location so we can pre-fill the edit form
-            current_details = df[df['Location'] == loc_to_manage].iloc[0]
+            # Get a list of ALL locations (warehouses and customers)
+            all_locations = df['Location'].tolist()
             
-            # Create two columns so the Edit and Delete forms sit side-by-side
-            manage_col1, manage_col2 = st.columns(2)
-            
-            # --- EDIT FORM ---
-            with manage_col1:
-                with st.form("edit_location_form"):
-                    st.write("**✏️ Edit Location Details**")
-                    
-                    # Pre-fill the inputs with the existing data
-                    edit_name = st.text_input("Name", value=current_details['Location'])
-                    edit_address = st.text_input("Address", value=current_details['Address'])
-                    
-                    # Figure out which dropdown option should be selected by default
-                    type_index = 0 if current_details['type'] == 'customer' else 1
-                    edit_type = st.selectbox("Location Type", ["customer", "warehouse"], index=type_index)
-                    
-                    update_btn = st.form_submit_button("Save Changes")
-                    
-                    if update_btn:
-                        update_location_details(loc_to_manage, edit_name, edit_address, edit_type)
-                        st.success(f"Successfully updated '{loc_to_manage}'!")
-                        st.cache_data.clear()
-                        st.rerun()
+            if all_locations:
+                loc_to_manage = st.selectbox("Select a Location to Edit or Delete", all_locations)
+                
+                # Find the current details of the selected location so we can pre-fill the edit form
+                current_details = df[df['Location'] == loc_to_manage].iloc[0]
+                
+                # Create two columns so the Edit and Delete forms sit side-by-side
+                manage_col1, manage_col2 = st.columns(2)
+                
+                # --- EDIT FORM ---
+                with manage_col1:
+                    with st.form("edit_location_form"):
+                        st.write("**✏️ Edit Location Details**")
                         
-            # --- DELETE FORM ---
-            with manage_col2:
-                with st.form("delete_location_form"):
-                    st.write("**🗑️ Delete Location**")
-                    st.warning(f"Warning: This will permanently erase '{loc_to_manage}' and its delivery history.")
-                    
-                    # Use type="primary" to make the delete button stand out (usually turns it red)
-                    delete_btn = st.form_submit_button("Permanently Delete", type="primary")
-                    
-                    if delete_btn:
-                        delete_location_from_db(loc_to_manage)
-                        st.success(f"Successfully deleted '{loc_to_manage}'.")
-                        st.cache_data.clear()
-                        st.rerun()
+                        # Pre-fill the inputs with the existing data
+                        edit_name = st.text_input("Name", value=current_details['Location'])
+                        edit_address = st.text_input("Address", value=current_details['Address'])
+                        
+                        # Figure out which dropdown option should be selected by default
+                        type_index = 0 if current_details['type'] == 'customer' else 1
+                        edit_type = st.selectbox("Location Type", ["customer", "warehouse"], index=type_index)
+                        
+                        update_btn = st.form_submit_button("Save Changes")
+                        
+                        if update_btn:
+                            update_location_details(loc_to_manage, edit_name, edit_address, edit_type)
+                            st.success(f"Successfully updated '{loc_to_manage}'!")
+                            st.cache_data.clear()
+                            st.rerun()
+                            
+                # --- DELETE FORM ---
+                with manage_col2:
+                    with st.form("delete_location_form"):
+                        st.write("**🗑️ Delete Location**")
+                        st.warning(f"Warning: This will permanently erase '{loc_to_manage}' and its delivery history.")
+                        
+                        # Use type="primary" to make the delete button stand out (usually turns it red)
+                        delete_btn = st.form_submit_button("Permanently Delete", type="primary")
+                        
+                        if delete_btn:
+                            delete_location_from_db(loc_to_manage)
+                            st.success(f"Successfully deleted '{loc_to_manage}'.")
+                            st.cache_data.clear()
+                            st.rerun()

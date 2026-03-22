@@ -1,0 +1,17 @@
+.streamlit/
+app2.py
+app3.py
+CHEAT_SHEET.txt
+export_excel.py
+fetch_data.py
+generate_map.py
+hash_maker.py
+insert_data_in_local.py
+test_db.py
+test.py
+text_deliveries.xlsx
+update_status.py
+
+# Standard Python things to ignore
+__pycache__/
+*.pyc

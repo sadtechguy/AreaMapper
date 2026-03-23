@@ -1,0 +1,9 @@
+streamlit==1.42.0
+pandas==2.2.3
+folium==0.19.4
+streamlit-folium==0.24.0
+geopy==2.4.1
+psycopg2-binary==2.9.10
+streamlit-authenticator==0.4.2
+requests==2.32.5
+openpyxl==3.1.2
